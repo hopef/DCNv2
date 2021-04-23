@@ -34,3 +34,4 @@
 
 backup
 objs
+workspace/__pycache__
