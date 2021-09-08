@@ -178,7 +178,7 @@ def test_deformable_conv():
     kernel_size = 2
     stride      = 2
     dilation    = 1
-    padding     = 10
+    padding     = 1
     batch       = 3
     in_w        = 3
     in_h        = 5
@@ -221,3 +221,20 @@ if __name__ == "__main__":
 
     test_conv2d()
     test_deformable_conv()
+    # d = dcn.DeformableConV2(3, 3, 3, 1).cuda()
+    # d.weight.data.fill_(1)
+    # d.bias.data.fill_(0.5)
+
+    # print(d.weight.data.size())
+    # print(d.bias.data.size())
+
+    # input = torch.full((1, 3, 3, 3), 1).cuda()
+    # offset_and_mask = torch.full((1, 27, 3, 3), 1).cuda()
+
+    # coord_offset_y, coord_offset_x, coord_weight = torch.chunk(offset_and_mask, 3, dim=1)
+    # coord_offset = torch.cat((coord_offset_y, coord_offset_x), dim=1)
+    # coord_weight = torch.sigmoid(coord_weight)
+    # print(coord_weight)
+
+    # output = d(input, coord_offset, coord_weight)
+    # print(output)

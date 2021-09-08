@@ -115,7 +115,7 @@ class DeformableConV2(nn.Module):
         stdv = 1. / math.sqrt(n)
         self.weight.data.uniform_(-stdv, stdv)
 
-        if self.bias:
+        if self.bias is not None:
             self.bias.data.zero_()
 
 

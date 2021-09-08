@@ -2,9 +2,40 @@
 #include "dcnv2.cuh"
 #include <cublas_v2.h>
 #include "common.cuh"
+
+template<typename scalar_t>
+static __device__ scalar_t dcn_im2col_bilinear(const scalar_t *bottom_data, const int data_width,
+	const int width, const int height, scalar_t h, scalar_t w)
+{
+	int h_low = floor(h);
+	int w_low = floor(w);
+	int h_high = h_low + 1;
+	int w_high = w_low + 1;
+
+	scalar_t lh = h - h_low;
+	scalar_t lw = w - w_low;
+	scalar_t hh = 1 - lh, hw = 1 - lw;
+
+	scalar_t v1 = 0;
+	if (h_low >= 0 && w_low >= 0)
+		v1 = bottom_data[h_low * data_width + w_low];
+	scalar_t v2 = 0;
+	if (h_low >= 0 && w_high <= width - 1)
+		v2 = bottom_data[h_low * data_width + w_high];
+	scalar_t v3 = 0;
+	if (h_high <= height - 1 && w_low >= 0)
+		v3 = bottom_data[h_high * data_width + w_low];
+	scalar_t v4 = 0;
+	if (h_high <= height - 1 && w_high <= width - 1)
+		v4 = bottom_data[h_high * data_width + w_high];
+
+	scalar_t w1 = hh * hw, w2 = hh * lw, w3 = lh * hw, w4 = lh * lw;
+	scalar_t val = (w1 * v1 + w2 * v2 + w3 * v3 + w4 * v4);
+	return val;
+}
  
 template<typename scalar_t>
-static __device__ scalar_t dcn_im2col_bilinear(
+static __device__ scalar_t dcn_im2col_bilinear2(
     const scalar_t* input, const int width_step, 
     const int width, const int height,
     scalar_t y, scalar_t x
@@ -27,19 +58,19 @@ static __device__ scalar_t dcn_im2col_bilinear(
      */
 
     scalar_t v0 = 0;
-    if(x_low >= 0 && y_low >= 0)
+    if(x_low >= 0 && y_low >= 0 && x_low < width && y_low < height)
         v0 = input[y_low * width_step + x_low];
     
     scalar_t v1 = 0;
-    if(x_high < width && y_low >= 0)
+    if(x_high >= 0 && x_high < width && y_low >= 0 && y_low < height)
         v1 = input[y_low * width_step + x_high];
 
     scalar_t v2 = 0;
-    if(x_low >= 0 && y_high < height)
+    if(x_low >= 0 && x_low < width && y_high < height && y_high >= 0)
         v2 = input[y_high * width_step + x_low];
 
     scalar_t v3 = 0;
-    if(x_high < width && y_high < height)
+    if(x_high < width && x_high >= 0 && y_high < height && y_high >= 0)
         v3 = input[y_high * width_step + x_high];
 
     // printf("%f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %d, %d, %d, %d\n",
@@ -68,7 +99,6 @@ static __global__ void deformable_conv_im2col_kernel(
 ){
     const int position = blockIdx.x * blockDim.x + threadIdx.x;
     if(position >= edge) return;
-
     // input_data    b c h w
     // coord_offset  b (deformable_groups * 2 * kh * kw) h w
     // coord_weight  b (deformable_groups * 1 * kh * kw) h w
@@ -95,13 +125,12 @@ static __global__ void deformable_conv_im2col_kernel(
 
     for(int i = 0; i < kernel_h; ++i){
         for(int j = 0; j < kernel_w; ++j){
-            const scalar_t offset_y = coord_offset[(((((input_batch * deformable_groups + deformable_groups_index) * 2 + 0) * kernel_h + i) * kernel_w + j) * height + input_y) * width + input_x];
-            const scalar_t offset_x = coord_offset[(((((input_batch * deformable_groups + deformable_groups_index) * 2 + 1) * kernel_h + i) * kernel_w + j) * height + input_y) * width + input_x];
-            const scalar_t weight   = coord_weight[(((((input_batch * deformable_groups + deformable_groups_index) * 1 + 0) * kernel_h + i) * kernel_w + j) * height + input_y) * width + input_x];
+            const scalar_t offset_y = coord_offset[(((((input_batch * deformable_groups + deformable_groups_index) * 2 + 0) * kernel_h + i) * kernel_w + j) * output_height + output_y) * output_width + output_x];
+            const scalar_t offset_x = coord_offset[(((((input_batch * deformable_groups + deformable_groups_index) * 2 + 1) * kernel_h + i) * kernel_w + j) * output_height + output_y) * output_width + output_x];
+            const scalar_t weight   = coord_weight[(((((input_batch * deformable_groups + deformable_groups_index) * 1 + 0) * kernel_h + i) * kernel_w + j) * output_height + output_y) * output_width + output_x];
             const scalar_t input_y_new_position = input_y + i * dilation_h + offset_y;
             const scalar_t input_x_new_position = input_x + j * dilation_w + offset_x;
             scalar_t value = 0;
-
             if(input_y_new_position > -1 && input_x_new_position > -1 && input_y_new_position < height && input_x_new_position < width){
                 // 如果坐标在范围内，才需要进行插值。否则不需要
                 value = dcn_im2col_bilinear<scalar_t>(input_data_ptr, width, width, height, input_y_new_position, input_x_new_position) * weight;
@@ -127,7 +156,6 @@ void deformable_conv_im2col(
     int threads = 512;
     int blocks = ceil(num_kernels / (scalar_t)threads);
     const int channel_per_deformable_groups = channels / deformable_groups;
-
     deformable_conv_im2col_kernel<<<blocks, threads, 0, stream>>>(
         num_kernels, 
         input_data, coord_offset, coord_weight,
@@ -183,9 +211,9 @@ static __global__ void deformable_conv_col2im_kernel(
     const scalar_t* input_data_ptr  = input  + input_position;
     for(int i = 0; i < kernel_h; ++i){
         for(int j = 0; j < kernel_w; ++j){
-            int offset_y_position = (((((input_batch * deformable_groups + deformable_groups_index) * 2 + 0) * kernel_h + i) * kernel_w + j) * height + input_y) * width + input_x;
-            int offset_x_position = (((((input_batch * deformable_groups + deformable_groups_index) * 2 + 1) * kernel_h + i) * kernel_w + j) * height + input_y) * width + input_x;
-            int weight_position   = (((((input_batch * deformable_groups + deformable_groups_index) * 1 + 0) * kernel_h + i) * kernel_w + j) * height + input_y) * width + input_x;
+            int offset_y_position = (((((input_batch * deformable_groups + deformable_groups_index) * 2 + 0) * kernel_h + i) * kernel_w + j) * output_height + output_y) * output_width + output_x;
+            int offset_x_position = (((((input_batch * deformable_groups + deformable_groups_index) * 2 + 1) * kernel_h + i) * kernel_w + j) * output_height + output_y) * output_width + output_x;
+            int weight_position   = (((((input_batch * deformable_groups + deformable_groups_index) * 1 + 0) * kernel_h + i) * kernel_w + j) * output_height + output_y) * output_width + output_x;
             int column_grad_position = ((((col_batch * channels + col_channel) * kernel_h + i) * kernel_w + j) * output_height + output_y) * output_width + output_x;
             const scalar_t column_grad = dcolumn[column_grad_position];
             const scalar_t offset_y = coord_offset[offset_y_position];

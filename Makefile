@@ -20,9 +20,9 @@ sbinary := $(ext_name).so
 pch_file := src/pre_compile.hpp
 gch_file := src/pre_compile.hpp.gch
 
-anaconda_root 	:= /root/anaconda3
-cuda_root 		:= /usr/local/cuda-10.1
-pytorch_sdk 	:= $(anaconda_root)/lib/python3.8/site-packages/torch
+anaconda_root 	:= /data/datav/newbb/lean/anaconda3/envs/torch1.5
+cuda_root 		:= /usr/local/cuda-10.2
+pytorch_sdk 	:= $(anaconda_root)/lib/python3.7/site-packages/torch
 
 # 这里定义头文件库文件和链接目标没有加-I -L -l，后面用foreach一次性增加 
 include_paths := $(cuda_root)/include \
@@ -30,17 +30,19 @@ include_paths := $(cuda_root)/include \
 				 $(pytorch_sdk)/include \
 				 $(pytorch_sdk)/include/TH \
 				 $(pytorch_sdk)/include/THC \
-				 $(anaconda_root)/include/python3.8 \
-				 src
+				 $(anaconda_root)/include/python3.7m \
+				 src \
+				 /data/sxai/lean/opencv4.2.0/include/opencv4/
 
 # 这里需要清楚的认识链接的库到底链接是谁，这个非常重要
 # 要求链接对象一定是预期的
 library_paths := $(cuda_root)/lib64 \
 				 $(anaconda_root)/lib \
-				 $(pytorch_sdk)/lib
+				 $(pytorch_sdk)/lib \
+				 /data/sxai/lean/opencv4.2.0/lib/
 
 link_librarys := cudart cublas opencv_core opencv_imgcodecs opencv_imgproc \
-				c10_cuda c10 caffe2_nvrtc torch_cpu torch_cuda torch torch_python python3.8
+				c10_cuda c10 caffe2_nvrtc torch_cpu torch_cuda torch torch_python python3.7m
 
 # 定义编译选项,  -w屏蔽警告
 # compute_75,code=sm_75是针对RTX2080Ti显卡，如果其他显卡请修改
@@ -143,8 +145,8 @@ pro : $(workspace)/$(binary)
 dcn  : $(workspace)/$(sbinary)
 
 # 定义编译并执行的指令，并且执行目录切换到workspace下
-run : pro
-	@cd $(workspace) && ./$(binary)
+run : dcn
+	@cd $(workspace) && python test.py
 
 debug :
 	@echo $(cpp_objs)
